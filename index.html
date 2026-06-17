@@ -29,9 +29,17 @@
     <!-- twinkling starfield -->
     <div id="stars" style="position:absolute; inset:-10%; opacity:0; pointer-events:none; will-change:transform,opacity;"></div>
 
-    <!-- intro background frame (user-supplied) -->
-    <div id="frame" style="position:absolute; inset:0; pointer-events:none; will-change:opacity;">
-      <img src="assets/intro-bg.jpg" alt="" style="width:100%; height:100%; object-fit:cover; display:block;">
+    <!-- intro background frame (user-supplied) with seamless looping warp -->
+    <svg width="0" height="0" style="position:absolute; pointer-events:none;" aria-hidden="true">
+      <defs>
+        <filter id="intro-warp" x="-15%" y="-15%" width="130%" height="130%" color-interpolation-filters="sRGB">
+          <feTurbulence id="warp-turb" type="fractalNoise" baseFrequency="0.0105 0.0115" numOctaves="2" seed="4" result="noise"></feTurbulence>
+          <feDisplacementMap id="warp-disp" in="SourceGraphic" in2="noise" scale="26" xChannelSelector="R" yChannelSelector="G" result="disp"></feDisplacementMap>
+        </filter>
+      </defs>
+    </svg>
+    <div id="frame" style="position:absolute; inset:0; overflow:hidden; pointer-events:none; will-change:opacity;">
+      <img src="assets/intro-bg.jpg" alt="" style="position:absolute; left:-2%; top:-2%; width:104%; height:104%; object-fit:fill; display:block; filter:url(#intro-warp);">
     </div>
 
     <!-- intro name: segmented so the middle letters collapse, pulling A + K together -->
@@ -63,6 +71,15 @@
       <div data-art style="position:absolute; left:0; top:0; width:clamp(140px,18vw,310px); height:clamp(98px,12vw,200px); opacity:0; transform:translate(-300px,-300px); will-change:transform,opacity; border-radius:7px; overflow:hidden; background:#0d0d0f; box-shadow:0 22px 55px rgba(0,0,0,.4);"><img src="gallery/art-15.png" alt="" style="width:100%;height:100%;object-fit:cover;display:block;"></div>
       <div data-art style="position:absolute; left:0; top:0; width:clamp(140px,18vw,310px); height:clamp(98px,12vw,200px); opacity:0; transform:translate(-300px,-300px); will-change:transform,opacity; border-radius:7px; overflow:hidden; background:#0d0d0f; box-shadow:0 22px 55px rgba(0,0,0,.4);"><img src="gallery/art-16.png" alt="" style="width:100%;height:100%;object-fit:cover;display:block;"></div>
       <div data-art style="position:absolute; left:0; top:0; width:clamp(140px,18vw,310px); height:clamp(98px,12vw,200px); opacity:0; transform:translate(-300px,-300px); will-change:transform,opacity; border-radius:7px; overflow:hidden; background:#0d0d0f; box-shadow:0 22px 55px rgba(0,0,0,.4);"><img src="gallery/art-17.png" alt="" style="width:100%;height:100%;object-fit:cover;display:block;"></div>
+    </div>
+
+    <!-- lightbox: click a piece to view it full-size -->
+    <div id="lightbox" style="position:fixed; inset:0; z-index:9999; display:none; align-items:center; justify-content:center; background:rgba(5,5,7,.94); backdrop-filter:blur(7px); -webkit-backdrop-filter:blur(7px); opacity:0; transition:opacity .32s ease; cursor:zoom-out; padding:5vh 6vw;">
+      <img id="lightbox-img" alt="" style="max-width:90vw; max-height:90vh; object-fit:contain; border-radius:6px; box-shadow:0 36px 110px rgba(0,0,0,.7); transform:scale(.9); transition:transform .32s cubic-bezier(.2,.8,.25,1); cursor:default;">
+      <button id="lb-close" aria-label="Close" style="position:absolute; top:22px; right:26px; width:48px; height:48px; border:none; border-radius:50%; background:rgba(255,255,255,.1); color:#fff; font-family:'Archivo',sans-serif; font-size:24px; line-height:1; cursor:pointer; display:flex; align-items:center; justify-content:center;">&times;</button>
+      <button id="lb-prev" aria-label="Previous" style="position:absolute; left:max(20px,3vw); top:50%; transform:translateY(-50%); width:56px; height:56px; border:none; border-radius:50%; background:rgba(255,255,255,.08); color:#fff; font-family:'Archivo',sans-serif; font-size:26px; line-height:1; cursor:pointer; display:flex; align-items:center; justify-content:center;">&#8249;</button>
+      <button id="lb-next" aria-label="Next" style="position:absolute; right:max(20px,3vw); top:50%; transform:translateY(-50%); width:56px; height:56px; border:none; border-radius:50%; background:rgba(255,255,255,.08); color:#fff; font-family:'Archivo',sans-serif; font-size:26px; line-height:1; cursor:pointer; display:flex; align-items:center; justify-content:center;">&#8250;</button>
+      <div id="lb-count" style="position:absolute; bottom:26px; left:50%; transform:translateX(-50%); color:#9a9aa2; font-family:'Archivo',sans-serif; font-size:13px; font-weight:600; letter-spacing:.22em;"></div>
     </div>
 
     <!-- about me -->
@@ -101,17 +118,20 @@ class Component extends DCLogic {
     this.buildStars();
     this.measureName();
     if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { this.measureName(); this.update(); });
-    let ticking = false;
-    this._onScroll = () => {
-      if (!ticking) { ticking = true; requestAnimationFrame(() => { this.update(); ticking = false; }); }
-    };
-    this._onResize = () => { this.measureName(); this.update(); };
-    window.addEventListener("scroll", this._onScroll, { passive: true });
+    this._onResize = () => { this.measureName(); this._lastY = -1; this.update(); };
     window.addEventListener("resize", this._onResize);
-    // a couple of passes so layout/fonts settle
+    // Continuous rAF poll — robust against listener/hot-reload quirks; cheap thanks to change detection.
+    this._lastY = -1;
+    this._alive = true;
+    const loop = () => {
+      if (!this._alive) return;
+      this.update();
+      this._raf = requestAnimationFrame(loop);
+    };
+    this._raf = requestAnimationFrame(loop);
     this.update();
-    setTimeout(() => this.update(), 60);
-    setTimeout(() => this.update(), 400);
+    setTimeout(() => { this._lastY = -1; this.update(); }, 60);
+    setTimeout(() => { this._lastY = -1; this.update(); }, 400);
   }
 
   componentDidUpdate() {
@@ -122,8 +142,10 @@ class Component extends DCLogic {
   }
 
   componentWillUnmount() {
-    window.removeEventListener("scroll", this._onScroll);
+    this._alive = false;
+    if (this._raf) cancelAnimationFrame(this._raf);
     window.removeEventListener("resize", this._onResize);
+    if (this._onKey) window.removeEventListener("keydown", this._onKey);
   }
 
   cache() {
@@ -135,7 +157,77 @@ class Component extends DCLogic {
       shrink: Array.prototype.slice.call(document.querySelectorAll("[data-shrink]")),
       gap: document.querySelector("[data-gap]"),
       cards: Array.prototype.slice.call(document.querySelectorAll("[data-art]")),
+      lb: $("lightbox"), lbImg: $("lightbox-img"), lbClose: $("lb-close"),
+      lbPrev: $("lb-prev"), lbNext: $("lb-next"), lbCount: $("lb-count"),
+      warpTurb: $("warp-turb"), warpDisp: $("warp-disp"),
     };
+    this.bindGallery();
+  }
+
+  bindGallery() {
+    const E = this.els;
+    if (E.cards.length && !E.cards[0]._bound) {
+      E.cards.forEach((card, i) => {
+        card._bound = true;
+        card._hv = 0; card._hvTarget = 0;
+        card.style.cursor = "pointer";
+        card.addEventListener("mouseenter", () => { card._hvTarget = 1; this.animateHover(); });
+        card.addEventListener("mouseleave", () => { card._hvTarget = 0; this.animateHover(); });
+        card.addEventListener("click", (e) => { e.stopPropagation(); this.openLightbox(i); });
+      });
+    }
+    if (E.lb && !E.lb._bound) {
+      E.lb._bound = true;
+      E.lb.addEventListener("click", () => this.closeLightbox());
+      E.lbImg.addEventListener("click", (e) => e.stopPropagation());
+      E.lbClose.addEventListener("click", (e) => { e.stopPropagation(); this.closeLightbox(); });
+      E.lbPrev.addEventListener("click", (e) => { e.stopPropagation(); this.stepLightbox(-1); });
+      E.lbNext.addEventListener("click", (e) => { e.stopPropagation(); this.stepLightbox(1); });
+      this._onKey = (e) => {
+        if (E.lb.style.display !== "flex") return;
+        if (e.key === "Escape") this.closeLightbox();
+        else if (e.key === "ArrowLeft") this.stepLightbox(-1);
+        else if (e.key === "ArrowRight") this.stepLightbox(1);
+      };
+      window.addEventListener("keydown", this._onKey);
+    }
+  }
+
+  animateHover() {
+    if (this._hoverRAF) return;
+    const tick = () => {
+      let moving = false;
+      this.els.cards.forEach((c) => {
+        const d = (c._hvTarget || 0) - (c._hv || 0);
+        if (Math.abs(d) > 0.012) { c._hv = (c._hv || 0) + d * 0.22; moving = true; }
+        else c._hv = c._hvTarget || 0;
+      });
+      this.update();
+      this._hoverRAF = moving ? requestAnimationFrame(tick) : null;
+    };
+    this._hoverRAF = requestAnimationFrame(tick);
+  }
+
+  openLightbox(i) {
+    const E = this.els;
+    this._lbIndex = i;
+    E.lbImg.src = E.cards[i].querySelector("img").src;
+    E.lbCount.textContent = (i + 1) + " / " + E.cards.length;
+    E.lb.style.display = "flex";
+    requestAnimationFrame(() => { E.lb.style.opacity = "1"; E.lbImg.style.transform = "scale(1)"; });
+  }
+
+  stepLightbox(dir) {
+    const n = this.els.cards.length;
+    this.openLightbox((this._lbIndex + dir + n) % n);
+  }
+
+  closeLightbox() {
+    const E = this.els;
+    E.lb.style.opacity = "0";
+    E.lbImg.style.transform = "scale(.9)";
+    clearTimeout(this._lbTimer);
+    this._lbTimer = setTimeout(() => { E.lb.style.display = "none"; }, 320);
   }
 
   buildStars() {
@@ -204,8 +296,18 @@ class Component extends DCLogic {
     E.sub.style.opacity = (1 - seg(0.05, 0.09)).toFixed(3);
     E.cue.style.opacity = (1 - seg(0.012, 0.05)).toFixed(3);
 
-    // ---- intro background frame
-    E.frame.style.opacity = (1 - seg(0.10, 0.22)).toFixed(3);
+    // ---- intro background frame + seamless JS-driven warp (sine waves loop perfectly)
+    const frameOp = 1 - seg(0.10, 0.22);
+    E.frame.style.opacity = frameOp.toFixed(3);
+    if (frameOp > 0.01 && E.warpTurb && E.warpDisp) {
+      const t = (performance.now ? performance.now() : Date.now()) / 1000;
+      const TAU = Math.PI * 2;
+      const fx = (0.0105 + 0.0028 * Math.sin(t * TAU / 19)).toFixed(5);
+      const fy = (0.0118 + 0.0024 * Math.sin(t * TAU / 23 + 1.3)).toFixed(5);
+      const scale = (27 + 13 * Math.sin(t * TAU / 11)).toFixed(2);
+      E.warpTurb.setAttribute("baseFrequency", fx + " " + fy);
+      E.warpDisp.setAttribute("scale", scale);
+    }
 
     // ---- MyWork
     const mwz = eIn(seg(0.66, 0.75));
@@ -226,17 +328,24 @@ class Component extends DCLogic {
       for (let i = 0; i < n; i++) {
         const aDeg = start + i * step + gT * sweep;
         const card = cards[i];
-        if (aDeg < -92 || aDeg > 92) { card.style.opacity = "0"; continue; }
+        if (aDeg < -92 || aDeg > 92) { card.style.opacity = "0"; card.style.pointerEvents = "none"; continue; }
         const a = aDeg * D2R;
         const x = cx + R * Math.sin(a);
         const y = cyBase + R * (1 - Math.cos(a));
         const depth = Math.cos(a);
-        const sc = lerp(0.46, 1.16, clamp(depth, 0, 1));
+        const hv = card._hv || 0;
+        const sc = lerp(0.46, 1.16, clamp(depth, 0, 1)) * lerp(1, 1.24, hv);
+        const rot = aDeg * (1 - 0.65 * hv);   // straightens as it pops forward on hover
         const op = clamp((92 - Math.abs(aDeg)) / 16, 0, 1) * gOp;
-        card.style.transform = `translate(${x.toFixed(1)}px,${y.toFixed(1)}px) translate(-50%,-50%) rotate(${aDeg.toFixed(2)}deg) scale(${sc.toFixed(3)})`;
+        card.style.transform = `translate(${x.toFixed(1)}px,${y.toFixed(1)}px) translate(-50%,-50%) rotate(${rot.toFixed(2)}deg) scale(${sc.toFixed(3)})`;
         card.style.opacity = op.toFixed(3);
-        card.style.zIndex = String(Math.round(depth * 100));
+        card.style.zIndex = hv > 0.05 ? "900" : String(Math.round(depth * 100));
+        card.style.pointerEvents = op > 0.12 ? "auto" : "none";
+        card.style.filter = hv > 0.001 ? `brightness(${(1 + 0.14 * hv).toFixed(3)})` : "none";
+        card.style.boxShadow = `0 ${(22 + 26 * hv).toFixed(0)}px ${(55 + 34 * hv).toFixed(0)}px rgba(0,0,0,${(0.4 + 0.22 * hv).toFixed(3)})`;
       }
+    } else {
+      for (let i = 0; i < E.cards.length; i++) E.cards[i].style.pointerEvents = "none";
     }
 
     // ---- stars
